@@ -1,0 +1,14 @@
+{
+  "name": "pulse-api",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^1.0.0",
+    "ai": "^4.0.0",
+    "next": "^15.0.0"
+  }
+}
