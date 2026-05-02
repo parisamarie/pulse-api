@@ -12,18 +12,28 @@ const DEAL_PROPERTIES = [
 ];
 
 const COMPANY_PROPERTIES = [
+  // Identity
   'name', 'domain', 'industry', 'description', 'country', 'creator_payout_country',
-  'hs_lead_status', 'churn_status', 'churn_status_commentary',
+  'hs_lead_status', 'business_type', 'gtm_revenue_band', 'whop_fit_score',
+  // GMV & Revenue
   'l30_days_gmv', 'l60_days_gmv', 'l90_days_gmv', 'total_gmv',
-  'l30d_gmv_on_ad_spend', 'l30d_ad_spend_external', 'total_ads_spend', 'active_deal',
-  'l30d_gtv_card_spend', 'total_gtv_card_spend', 'card_upsell_status', 'cards_upsell_status',
-  'has_bnpl_enabled', 'l30d_bnpl_gmv', 'last_30d_bnpl_fee_revenue',
-  'payments_status', 'using_whop_payments', 'last_30d_withdrawals',
-  'l30_churned_percentage', 'l7d_soft_churn', 'l3_l1_drop',
-  'l3_days_no_revenue', 'l30_days_no_revenue', 'missing_l30_gmvs',
-  'last_7d_gmv_wow', 'last_30d_new_gmv', 'last_30d_new_gmv_mom',
+  'last_30d_new_gmv', 'last_30d_new_gmv_mom', 'last_7d_gmv_wow',
   'current_quarter_gmv', 'prev_quarter_gmv', 'projected_gmv',
-  'gtm_revenue_band', 'whop_fit_score', 'whopx_qualified', 'whop_x_member', 'whop_u_member',
+  'l30_60_days_gmv', 'yesterdays_gmv',
+  // Ad Spend
+  'l30d_gmv_on_ad_spend', 'l30d_ad_spend_external', 'total_ads_spend', 'active_deal',
+  // Cards
+  'l30d_gtv_card_spend', 'total_gtv_card_spend', 'card_upsell_status', 'cards_upsell_status',
+  // BNPL
+  'has_bnpl_enabled', 'l30d_bnpl_gmv', 'last_30d_bnpl_fee_revenue', 'prev_l30d_bnpl_gmv',
+  // Payments & Balance
+  'payments_status', 'using_whop_payments', 'last_30d_withdrawals',
+  // Churn & Health
+  'churn_status', 'churn_status_commentary', 'l30_churned_percentage',
+  'l7d_soft_churn', 'l3_l1_drop', 'l3_days_no_revenue', 'l30_days_no_revenue', 'missing_l30_gmvs',
+  // WhopX / Tiers
+  'whopx_qualified', 'whop_x_member', 'whop_u_member',
+  // Other
   'annualrevenue', 'numberofemployees', 'hubspot_owner_id',
 ];
 
@@ -78,32 +88,58 @@ function buildPrompt(isDeal: boolean, properties: Record<string, string>, notes:
       ? `\n\nRECENT NOTES:\n${notes.map((n, i) => `[${i + 1}] ${n}`).join('\n\n')}`
       : '';
 
-  const companyInstructions = `You are a Whop sales analyst. Whop is a creator monetization platform. Review this company and give a sharp, punchy briefing a sales rep can act on immediately.
+  const companyInstructions = `You are a Whop sales analyst. Whop is an all-in-one creator monetization platform — memberships, courses, communities, events, affiliates, and a full payments stack (multi-PSP routing, BNPL, Whop Cards, 7% APY treasury, Whop for Platforms).
+
+CONTEXT ON WHOP'S KEY UPSELLS & VALUE PROPS:
+- BNPL: Whop offers 10 BNPL providers. Enabling BNPL increases checkout conversion, especially for high-ticket offers. Availability depends on country: USA (AfterPay, Klarna, Splitit, Sezzle, ZipPay, ClarityPay, Climb), EU (Klarna, Scalapay, SeQura), UAE/Saudi (Tamara), Spain (SeQura), Italy/France/Spain/Portugal (Scalapay). If BNPL is off and country supports it, this is an immediate upsell.
+- Whop Ads: Creators can run ads on Whop's platform to drive discovery. If l30d_gmv_on_ad_spend or ad_spend is low/zero, they're leaving growth on the table.
+- Whop Cards (via Rain.xyz): Business spend cards. If l30d_gtv_card_spend is zero or card_upsell_status shows not started, flag it.
+- Whop Finance / Treasury: 7% APY on balances via Veda staking. If they're not using it, they're missing yield on their Whop balance.
+- Whop for Platforms: If business type looks like a marketplace, agency, or platform operator, Whop for Platforms (like Stripe Connect) is a fit — invite-only, contact sales@whop.com.
+- WhopX: Premium tier for top creators. If whopx_qualified is true but whop_x_member is false, flag it.
+- Affiliates: Native affiliate/rev-share program. If not set up, call it out.
+- Payments: If using_whop_payments is false or payments_status is not active, that's a major gap.
+
+COUNTRY-SPECIFIC CONTEXT:
+- UAE/Saudi Arabia: Tamara BNPL available (Sharia-compliant, no fees). Strong growth market.
+- EU (Italy, France, Spain, Portugal): Scalapay, SeQura, Klarna available.
+- UK: AfterPay (ClearPay), Klarna available.
+- USA: Full suite — all 10 BNPL options potentially available.
+- Outside these regions: Limited BNPL. Flag if this is blocking conversion.
+
+CHURN RISK THRESHOLDS:
+- l3_days_no_revenue > 0: urgent — recent revenue gap
+- l7d_soft_churn is set: early churn signal, needs immediate outreach
+- l30_churned_percentage > 20%: high churn, retention play needed
+- l3_l1_drop is negative: membership shrinking
+- churn_status is anything other than healthy/active: flag immediately
+- GMV declining L30 vs L60 vs L90: downtrend, investigate
 
 COMPANY DATA:
 ${propsText}${notesText}
 
 Respond with valid JSON in exactly this format:
 {
-  "summary": "One sentence: who they are and their current health on Whop.",
+  "summary": "One sentence: who they are, their GMV tier, and current health on Whop.",
   "keyPoints": [
-    "BNPL: on or off — if off, flag as upsell opportunity",
-    "Cards: L30D card spend and whether Cards upsell has been started",
-    "Ad Spend: L30D GMV on ad spend and ads upsell status",
-    "Churn: churn status, L30 churned %, L7D soft churn, L3→L1 drop — flag anything alarming",
-    "GMV trend: L30/L60/L90 GMV comparison — growing, flat, or declining",
-    "Country: flag if country limits available features (BNPL, payouts, cards) or creates a risk",
-    "Risk: any negative balance, missing GMV, no revenue days, or payments issues"
+    "GMV: L30/L60/L90 trend — growing, flat, or declining with % change if possible",
+    "Churn: status, L30 churned %, L7D soft churn, L3→L1 drop — flag anything alarming",
+    "BNPL: on/off — if off, which providers are available for their country (be specific)",
+    "Ads: L30D GMV on ad spend and ads upsell status — opportunity or already active",
+    "Cards: L30D card spend — using it or not, upsell status",
+    "Payments: using Whop payments, any balance issues, withdrawals",
+    "Upsells: WhopX qualification, Whop Finance/Treasury, Platforms API fit, affiliates",
+    "Risk: any red flags — no revenue days, missing GMV, negative balance, payment issues, country blocks"
   ],
-  "nextStep": "Single most important action — be specific and direct."
+  "nextStep": "Single most important action right now — be specific (e.g. 'Enable Klarna BNPL — EU-based, currently $0 BNPL GMV' or 'Urgent: 3 days no revenue, soft churn signal — call today')."
 }
 
 Rules:
-- Each keyPoint is one short punchy line. Lead with the label (e.g. "BNPL:", "Churn:").
-- Only include a keyPoint if there is actual data or a clear flag. Skip if no data.
-- Never pad with generic advice. If something looks good, say so in one word ("Clean").
-- Flag risks bluntly. Flag upsell gaps directly.
-- Country context: if payout country limits BNPL or card features, call it out.`;
+- Each keyPoint is one punchy line. Lead with the label in caps.
+- Only include a keyPoint if there is actual data or a clear flag. Skip lines with no data.
+- If something is clean and healthy, one word: "Clean."
+- Never pad. Surface what matters. Flag risks bluntly. Call out upsells directly.
+- Be specific with numbers when available (e.g. "$12k L30 GMV, down 18% vs L60").`;
 
   const dealInstructions = `You are a Whop sales analyst. Review this deal and give a sharp, punchy briefing a sales rep can act on immediately.
 
@@ -112,15 +148,15 @@ ${propsText}${notesText}
 
 Respond with valid JSON in exactly this format:
 {
-  "summary": "One sentence: deal status and the key thing to know.",
+  "summary": "One sentence: deal status and the single most important thing to know.",
   "keyPoints": [
     "Stage & value — where it is and what it's worth",
-    "Source — how it came in and any context on fit",
+    "Source — how it came in and fit signal",
     "Win/loss signal — reason won or lost if available",
     "Risk or blocker — anything that looks off",
-    "Timeline — is it moving or stalled"
+    "Timeline — moving or stalled"
   ],
-  "nextStep": "Single most important action — be specific and direct."
+  "nextStep": "Single most important action — specific and direct."
 }
 
 Rules:
