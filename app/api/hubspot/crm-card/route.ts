@@ -186,22 +186,22 @@ export async function GET(request: Request) {
   const objectName = isDeal ? 'deals' : 'companies';
   const properties = isDeal ? DEAL_PROPERTIES : COMPANY_PROPERTIES;
 
-  const recordRes = await hsRequest(
-    'GET',
-    `/crm/v3/objects/${objectName}/${recordId}?properties=${properties.join(',')}`,
-  );
+  const [recordRes, notes] = await Promise.all([
+    hsRequest('GET', `/crm/v3/objects/${objectName}/${recordId}?properties=${properties.join(',')}`),
+    fetchRecentNotes(objectName, recordId),
+  ]);
 
   if (!recordRes.ok) {
     return NextResponse.json({ error: 'Failed to fetch record from HubSpot' }, { status: 502 });
   }
 
   const record = await recordRes.json();
-  const notes = await fetchRecentNotes(objectName, recordId);
   const prompt = buildPrompt(isDeal, record.properties ?? {}, notes);
 
   const { text } = await generateText({
-    model: anthropic('claude-sonnet-4-6'),
+    model: anthropic('claude-haiku-4-5-20251001'),
     prompt,
+    maxTokens: 1024,
   });
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
