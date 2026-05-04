@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { generateText } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
 
+export const maxDuration = 60;
+
 const DEAL_TYPE = '0-3';
 const COMPANY_TYPE = '0-2';
 
