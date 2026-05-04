@@ -326,13 +326,17 @@ async function generateAndCache(objectName: string, recordId: string, isDeal: bo
     maxTokens: 2048,
   });
 
-  const cleaned = text.replace(/```(?:json)?\s*/g, '').trim();
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  const cleaned = text.replace(/^[^{]*/, '').replace(/[^}]*$/, '').trim();
   let result: Record<string, unknown>;
   try {
-    result = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text, keyPoints: [], nextStep: '' };
+    result = JSON.parse(cleaned);
   } catch {
-    result = { summary: text, keyPoints: [], nextStep: '' };
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    try {
+      result = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: 'Analysis failed — hit Refresh to retry.', keyPoints: [], nextStep: '' };
+    } catch {
+      result = { summary: 'Analysis failed — hit Refresh to retry.', keyPoints: [], nextStep: '' };
+    }
   }
 
   await hsRequest('PATCH', `/crm/v3/objects/${objectName}/${recordId}`, {
@@ -374,26 +378,37 @@ export async function GET(request: Request) {
   const cachedJson = cacheRecord.properties?.pulse_summary_json;
   const cachedAt = cacheRecord.properties?.pulse_summary_updated_at;
 
+  function isValidCache(json: string): Record<string, unknown> | null {
+    try {
+      const parsed = JSON.parse(json);
+      if (!parsed.summary || parsed.summary.includes('"keyPoints"') || parsed.summary.includes('```')) {
+        return null;
+      }
+      if (Array.isArray(parsed.keyPoints) && parsed.keyPoints.length === 0 && parsed.summary.includes('Generating')) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
   const isFresh = cachedAt && cachedJson
     && (Date.now() - new Date(cachedAt).getTime()) < CACHE_TTL_MS
     && refresh !== 'true';
 
   if (isFresh) {
-    try {
-      return NextResponse.json(JSON.parse(cachedJson));
-    } catch {
-      // corrupted cache, fall through to regenerate
-    }
+    const cached = isValidCache(cachedJson);
+    if (cached) return NextResponse.json(cached);
   }
 
   if (cachedJson && !refresh) {
-    after(async () => {
-      await generateAndCache(objectName, recordId, isDeal);
-    });
-    try {
-      return NextResponse.json(JSON.parse(cachedJson));
-    } catch {
-      // corrupted cache, fall through
+    const cached = isValidCache(cachedJson);
+    if (cached) {
+      after(async () => {
+        await generateAndCache(objectName, recordId, isDeal);
+      });
+      return NextResponse.json(cached);
     }
   }
 
