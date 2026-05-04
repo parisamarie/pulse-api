@@ -23,7 +23,8 @@ const COMPANY_PROPERTIES = [
   // Ad Spend
   'l30d_gmv_on_ad_spend', 'l30d_ad_spend_external', 'total_ads_spend', 'active_deal',
   // Cards
-  'l30d_gtv_card_spend', 'total_gtv_card_spend', 'card_upsell_status', 'cards_upsell_status',
+  'l30d_gtv_card_spend', 'l3d_gtv_card_spend', 'l1d_gtv_card_spend', 'total_gtv_card_spend',
+  'card_upsell_status', 'cards_upsell_status', 'cards__last_updated_date',
   // BNPL
   'has_bnpl_enabled', 'l30d_bnpl_gmv', 'last_30d_bnpl_fee_revenue', 'prev_l30d_bnpl_gmv',
   // Payments & Balance
@@ -191,6 +192,32 @@ Also flag re-engagement signals from notes ("open to revisit Q2," "want to retry
 Example: "Paused 12d ago — customer cited 'CPMs too high vs in-house Meta team' on call. Open to re-engage Q2 per chat thread."
 
 ================================================================
+CARDS DIAGNOSIS — RUN FOR EVERY COMPANY
+================================================================
+
+Every company has a cards pipeline stage in \`card_upsell_status\`. Use notes as the primary source of truth for qualitative signals — what they're spending on, what card product they currently use, cashflow pain points, KYB blockers, and cash back sensitivity.
+
+WHAT TO SURFACE FROM NOTES:
+- What are their business expenses and what would they use cards for? (ads, payroll, software, travel, etc.)
+- Are they using another card product already? (Ramp, Brex, corporate Amex, etc.) — if so, what's the switching barrier?
+- Do they have ad spend that could run on Whop Cards? Flag the opportunity specifically.
+- How much do they care about cash back? Any mention of cash back rates from a competitor is a direct attack vector.
+- What is their biggest cards pain point? Cashflow issues, delayed payouts, needing float?
+- If they have payout issues or withdrawal friction with Whop, flag this as a cards upsell — Whop Cards solves the "I need cash faster" problem.
+
+ONBOARDING & KYB:
+- What stage are they in onboarding? Have they applied, been approved, received physical card?
+- How long have they been in the current onboarding stage? If > 7 days stuck, flag it.
+- Are they experiencing KYB issues? Look for any mention of identity verification, document submission, compliance holds.
+- If KYB is a blocker, name the specific issue from notes.
+
+RETENTION (for active card users):
+- Are they spending as a proportion of their GMV? Healthy benchmark: card spend should grow alongside GMV.
+- Compare l30d_gtv_card_spend vs l3d_gtv_card_spend vs l1d_gtv_card_spend — is spend trending up, flat, or declining?
+- If spend dropped week-over-week, pull the specific reason from notes. Common patterns: paused ad campaigns, seasonal slowdown, switched back to old card, cash flow timing.
+- Flag if last contact > 14 days for active card users.
+
+================================================================
 
 COMPANY DATA:
 ${propsText}${notesText}
@@ -217,6 +244,21 @@ Respond with valid JSON in exactly this format:
     "diagnosis": "One punchy line explaining exactly why they are not fully on ads at this stage. Quote from notes where useful. Include numbers when relevant (GMV gap for Spending, days stuck for Assets Shared, etc.).",
     "blocker": "The single specific blocker — internal access, ramp gate, competitive comparison, performance concern, AM bandwidth, etc.",
     "nextStep": "The single most important ads-specific action right now."
+  },
+  "cardsSection": {
+    "stage": "Current card_upsell_status stage name",
+    "spendL30": 0,
+    "spendL3": 0,
+    "spendL1": 0,
+    "spendTrend": "up / flat / down",
+    "existingCardProduct": "What card product they currently use, or null if none",
+    "useCase": "What they would use Whop Cards for based on notes — ad spend, payroll, software, etc.",
+    "cashBackSensitivity": "High / Medium / Low / Unknown — based on any mention in notes",
+    "cashflowPain": "Describe any cashflow or payout friction that makes cards a fit, or null",
+    "kybIssue": "Specific KYB blocker from notes, or null",
+    "daysInOnboarding": 0,
+    "diagnosis": "One punchy line on where they are in the cards journey and the key blocker or opportunity.",
+    "nextStep": "The single most important cards-specific action right now."
   },
   "nextStep": "Single most important action across the whole account right now — be specific (e.g. 'Enable Klarna BNPL — EU-based, currently $0 BNPL GMV' or 'Urgent: 3 days no revenue, soft churn signal — call today')."
 }
@@ -295,7 +337,7 @@ export async function GET(request: Request) {
   const { text } = await generateText({
     model: anthropic('claude-haiku-4-5-20251001'),
     prompt,
-    maxTokens: 1024,
+    maxTokens: 2048,
   });
 
   const jsonMatch = text.match(/\{[\s\S]*\}/);
