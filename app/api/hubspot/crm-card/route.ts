@@ -1,6 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { generateText } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
+
+const CACHE_TTL_MS = 4 * 60 * 60 * 1000;
 
 export const maxDuration = 60;
 
@@ -305,10 +307,48 @@ Rules:
   return isDeal ? dealInstructions : companyInstructions;
 }
 
+async function generateAndCache(objectName: string, recordId: string, isDeal: boolean) {
+  const properties = isDeal ? DEAL_PROPERTIES : COMPANY_PROPERTIES;
+
+  const [recordRes, notes] = await Promise.all([
+    hsRequest('GET', `/crm/v3/objects/${objectName}/${recordId}?properties=${properties.join(',')}`),
+    fetchRecentNotes(objectName, recordId),
+  ]);
+
+  if (!recordRes.ok) return null;
+
+  const record = await recordRes.json();
+  const prompt = buildPrompt(isDeal, record.properties ?? {}, notes);
+
+  const { text } = await generateText({
+    model: anthropic('claude-haiku-4-5-20251001'),
+    prompt,
+    maxTokens: 2048,
+  });
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  let result: Record<string, unknown>;
+  try {
+    result = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text, keyPoints: [], nextStep: '' };
+  } catch {
+    result = { summary: text, keyPoints: [], nextStep: '' };
+  }
+
+  await hsRequest('PATCH', `/crm/v3/objects/${objectName}/${recordId}`, {
+    properties: {
+      pulse_summary_json: JSON.stringify(result),
+      pulse_summary_updated_at: new Date().toISOString(),
+    },
+  });
+
+  return result;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const recordId = searchParams.get('recordId');
   const objectType = searchParams.get('objectType');
+  const refresh = searchParams.get('refresh');
 
   if (!recordId || !objectType) {
     return NextResponse.json({ error: 'Missing recordId or objectType' }, { status: 400 });
@@ -322,35 +362,47 @@ export async function GET(request: Request) {
   }
 
   const objectName = isDeal ? 'deals' : 'companies';
-  const properties = isDeal ? DEAL_PROPERTIES : COMPANY_PROPERTIES;
+  const cacheProps = 'pulse_summary_json,pulse_summary_updated_at';
 
-  const [recordRes, notes] = await Promise.all([
-    hsRequest('GET', `/crm/v3/objects/${objectName}/${recordId}?properties=${properties.join(',')}`),
-    fetchRecentNotes(objectName, recordId),
-  ]);
-
-  if (!recordRes.ok) {
+  const cacheRes = await hsRequest('GET', `/crm/v3/objects/${objectName}/${recordId}?properties=${cacheProps}`);
+  if (!cacheRes.ok) {
     return NextResponse.json({ error: 'Failed to fetch record from HubSpot' }, { status: 502 });
   }
 
-  const record = await recordRes.json();
-  const prompt = buildPrompt(isDeal, record.properties ?? {}, notes);
+  const cacheRecord = await cacheRes.json();
+  const cachedJson = cacheRecord.properties?.pulse_summary_json;
+  const cachedAt = cacheRecord.properties?.pulse_summary_updated_at;
 
-  const { text } = await generateText({
-    model: anthropic('claude-haiku-4-5-20251001'),
-    prompt,
-    maxTokens: 2048,
+  const isFresh = cachedAt && cachedJson
+    && (Date.now() - new Date(cachedAt).getTime()) < CACHE_TTL_MS
+    && refresh !== 'true';
+
+  if (isFresh) {
+    try {
+      return NextResponse.json(JSON.parse(cachedJson));
+    } catch {
+      // corrupted cache, fall through to regenerate
+    }
+  }
+
+  if (cachedJson && !refresh) {
+    after(async () => {
+      await generateAndCache(objectName, recordId, isDeal);
+    });
+    try {
+      return NextResponse.json(JSON.parse(cachedJson));
+    } catch {
+      // corrupted cache, fall through
+    }
+  }
+
+  after(async () => {
+    await generateAndCache(objectName, recordId, isDeal);
   });
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    return NextResponse.json({ summary: text, keyPoints: [], nextStep: '' });
-  }
-
-  try {
-    const result = JSON.parse(jsonMatch[0]);
-    return NextResponse.json(result);
-  } catch {
-    return NextResponse.json({ summary: text, keyPoints: [], nextStep: '' });
-  }
+  return NextResponse.json({
+    summary: 'Generating Pulse summary — hit Retry in ~15 seconds.',
+    keyPoints: [],
+    nextStep: 'Retry to load the full analysis.',
+  });
 }
