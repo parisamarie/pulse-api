@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" width="200" height="60">
+  <style>
+    .line { fill: none; stroke: #f25c54; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .dot { fill: #f25c54; }
+    @keyframes draw {
+      0%   { stroke-dashoffset: 400; }
+      100% { stroke-dashoffset: 0; }
+    }
+    @keyframes pulse {
+      0%, 100% { r: 4; opacity: 1; }
+      50%      { r: 6; opacity: 0.6; }
+    }
+    .line {
+      stroke-dasharray: 400;
+      animation: draw 2s linear infinite;
+    }
+    .dot {
+      animation: pulse 1s ease-in-out infinite;
+    }
+  </style>
+  <path class="line" d="M 10,30 L 50,30 L 60,30 L 70,10 L 80,50 L 90,10 L 100,50 L 110,30 L 120,30 L 130,30 L 140,30 L 150,30 L 160,30 L 190,30" />
+  <circle class="dot" cx="190" cy="30" r="4" />
+</svg>
