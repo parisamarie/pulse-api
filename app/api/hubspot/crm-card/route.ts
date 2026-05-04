@@ -326,7 +326,8 @@ async function generateAndCache(objectName: string, recordId: string, isDeal: bo
     maxTokens: 2048,
   });
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const cleaned = text.replace(/```(?:json)?\s*/g, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
   let result: Record<string, unknown>;
   try {
     result = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: text, keyPoints: [], nextStep: '' };
