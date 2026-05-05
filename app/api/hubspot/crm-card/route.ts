@@ -328,23 +328,28 @@ async function generateAndCache(objectName: string, recordId: string, isDeal: bo
 
   const cleaned = text.replace(/^[^{]*/, '').replace(/[^}]*$/, '').trim();
   let result: Record<string, unknown>;
+  let parsed = false;
   try {
     result = JSON.parse(cleaned);
+    parsed = true;
   } catch {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     try {
       result = jsonMatch ? JSON.parse(jsonMatch[0]) : { summary: 'Analysis failed — hit Refresh to retry.', keyPoints: [], nextStep: '' };
+      parsed = !!jsonMatch;
     } catch {
       result = { summary: 'Analysis failed — hit Refresh to retry.', keyPoints: [], nextStep: '' };
     }
   }
 
-  await hsRequest('PATCH', `/crm/v3/objects/${objectName}/${recordId}`, {
-    properties: {
-      pulse_summary_json: JSON.stringify(result),
-      pulse_summary_updated_at: new Date().toISOString(),
-    },
-  });
+  if (parsed) {
+    await hsRequest('PATCH', `/crm/v3/objects/${objectName}/${recordId}`, {
+      properties: {
+        pulse_summary_json: JSON.stringify(result),
+        pulse_summary_updated_at: new Date().toISOString(),
+      },
+    });
+  }
 
   return result;
 }
